@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WA COVID-19 Fully Vaccinated Rate (per 10k) by County</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+
+  <!-- MapLibre GL JS -->
+  <link href="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .map-card {
+      position: absolute;
+      left: 16px;
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      padding: 10px 12px;
+      z-index: 2;
+      max-width: 300px;
+    }
+
+    #info-card {
+      top: 16px;
+    }
+
+    #legend-card {
+      bottom: 24px;
+    }
+
+    h2, h3 {
+      margin: 0 0 6px 0;
+      font-size: 16px;
+    }
+
+    p {
+      margin: 2px 0;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    #legend-title {
+      font-weight: 600;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+
+    .legend-key {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      margin-right: 6px;
+      flex-shrink: 0;
+    }
+
+    /* Popup UI */
+    .maplibregl-popup-content {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      line-height: 1.4;
+      border-radius: 8px;
+      padding: 10px 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .popup-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .popup-subtitle {
+      font-size: 11px;
+      color: #555;
+      margin-bottom: 6px;
+    }
+
+    .popup-metric-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    .popup-metric-label {
+      color: #555;
+    }
+
+    .popup-metric-value {
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="info-card" class="map-card">
+    <h2>WA COVID-19 Fully Vaccinated Rate</h2>
+    <div id="text-description">
+      <p>Hover over a county to see vaccination rates.</p>
+    </div>
+    <p style="margin-top:4px;">
+      Values show the number of fully vaccinated people per 10,000 residents,
+      as of October 25, 2021. Click a county to see case and death rates too.
+    </p>
+  </div>
+
+  <div id="legend-card" class="map-card">
+    <div id="legend-title">Fully vaccinated<br>(people per 10,000)</div>
+    <div id="legend"></div>
+  </div>
+
+  <script>
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: 'https://demotiles.maplibre.org/style.json',
+      zoom: 6.5,
+      center: [-120.5, 47.5] // Washington
+    });
+
+    let activePopup = null;
+    let selectedName = null; // track which county is currently highlighted
+
+    map.on('load', async () => {
+      try {
+        const response = await fetch('assets/wa-covid-data-102521.geojson');
+        const covidData = await response.json();
+
+        // Main data source
+        map.addSource('covidData', {
+          type: 'geojson',
+          data: covidData
+        });
+
+        // Main choropleth layer
+        map.addLayer({
+          id: 'covidData-layer',
+          type: 'fill',
+          source: 'covidData',
+          paint: {
+            'fill-color': [
+              'step',
+              ['get', 'fullyVaxPer10k'],
+              '#f7fbff',   // < 4000
+              4000, '#c6dbef',
+              5000, '#9ecae1',
+              6000, '#6baed6',
+              7000, '#3182bd',
+              8000, '#08519c'
+            ],
+            'fill-outline-color': '#444444',
+            'fill-opacity': 0.7
+          }
+        });
+
+        // Highlight layer for clicked county (neon green outline)
+        map.addLayer({
+          id: 'covidData-highlight',
+          type: 'line',
+          source: 'covidData',
+          paint: {
+            'line-color': '#39FF14', // neon green
+            'line-width': 3
+          },
+          filter: ['==', ['get', 'name'], ''] // nothing highlighted initially
+        });
+
+        // Legend
+        const layers = [
+          'Less than 4,000',
+          '4,000 – 4,999',
+          '5,000 – 5,999',
+          '6,000 – 6,999',
+          '7,000 – 7,999',
+          '8,000 and more'
+        ];
+        const colors = [
+          '#f7fbff',
+          '#c6dbef',
+          '#9ecae1',
+          '#6baed6',
+          '#3182bd',
+          '#08519c'
+        ];
+
+        const legend = document.getElementById('legend');
+        legend.innerHTML = '';
+
+        layers.forEach((label, i) => {
+          const row = document.createElement('div');
+          row.className = 'legend-row';
+
+          const key = document.createElement('span');
+          key.className = 'legend-key';
+          key.style.backgroundColor = colors[i];
+
+          const value = document.createElement('span');
+          value.textContent = label;
+
+          row.appendChild(key);
+          row.appendChild(value);
+          legend.appendChild(row);
+        });
+
+        map.addControl(new maplibregl.NavigationControl());
+
+        // Hover interaction (side card)
+        map.on('mousemove', (event) => {
+          const features = map.queryRenderedFeatures(event.point, {
+            layers: ['covidData-layer']
+          });
+
+          const info = document.getElementById('text-description');
+
+          if (!features.length) {
+            info.innerHTML = '<p>Hover over a county to see vaccination rates.</p>';
+            return;
+          }
+
+          const props = features[0].properties;
+          info.innerHTML =
+            `<h3>${props.name} County, WA</h3>
+             <p><strong>${props.fullyVaxPer10k}</strong> fully vaccinated per 10,000 people</p>`;
+        });
+
+        map.on('mouseenter', 'covidData-layer', () => {
+          map.getCanvas().style.cursor = 'pointer';
+        });
+
+        map.on('mouseleave', 'covidData-layer', () => {
+          map.getCanvas().style.cursor = '';
+        });
+
+        // Click interaction: highlight + rich popup
+        map.on('click', 'covidData-layer', (e) => {
+          const features = map.queryRenderedFeatures(e.point, {
+            layers: ['covidData-layer']
+          });
+          if (!features.length) return;
+          const props = features[0].properties;
+
+          // Track selected county name
+          selectedName = props.name;
+
+          // Update highlight filter
+          map.setFilter('covidData-highlight', [
+            '==',
+            ['get', 'name'],
+            props.name
+          ]);
+
+          // Close previous popup if it exists
+          if (activePopup) {
+            activePopup.remove();
+          }
+
+          const popupHtml = `
+            <div class="popup-title">${props.name} County</div>
+            <div class="popup-subtitle">Washington State · per 10,000 people</div>
+            <div class="popup-metric-row">
+              <span class="popup-metric-label">Fully vaccinated</span>
+              <span class="popup-metric-value">${props.fullyVaxPer10k}</span>
+            </div>
+            <div class="popup-metric-row">
+              <span class="popup-metric-label">Case rate</span>
+              <span class="popup-metric-value">${props.casePer10k}</span>
+            </div>
+            <div class="popup-metric-row">
+              <span class="popup-metric-label">Death rate</span>
+              <span class="popup-metric-value">${props.deathPer10k}</span>
+            </div>
+          `;
+
+          const thisPopupName = props.name;
+
+          activePopup = new maplibregl.Popup({ offset: 10, closeOnMove: false })
+            .setLngLat(e.lngLat)
+            .setHTML(popupHtml)
+            .addTo(map);
+
+          // When this specific popup closes, clear highlight
+          activePopup.on('close', () => {
+            // Only clear if we haven't clicked another county since
+            if (selectedName === thisPopupName) {
+              map.setFilter('covidData-highlight', ['==', ['get', 'name'], '']);
+              selectedName = null;
+            }
+          });
+        });
+
+      } catch (err) {
+        console.error('Error loading WA COVID GeoJSON:', err);
+      }
+    });
+  </script>
+</body>
+</html>

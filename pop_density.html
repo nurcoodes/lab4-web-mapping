@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>US Population Density (people per sq. mile)</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+
+  <!-- MapLibre GL JS -->
+  <link href="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .map-card {
+      position: absolute;
+      left: 16px;
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      padding: 10px 12px;
+      z-index: 2;
+      max-width: 300px;
+    }
+
+    #info-card {
+      top: 16px;
+    }
+
+    #legend-card {
+      bottom: 24px;
+    }
+
+    h2, h3 {
+      margin: 0 0 6px 0;
+      font-size: 16px;
+    }
+
+    p {
+      margin: 2px 0;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    #legend-title {
+      font-weight: 600;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+
+    .legend-key {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      margin-right: 6px;
+      flex-shrink: 0;
+    }
+
+    .maplibregl-canvas-container.maplibregl-interactive,
+    .maplibregl-ctrl-group button.maplibregl-ctrl-compass {
+      cursor: unset;
+    }
+
+    /* Popup styling */
+    .maplibregl-popup-content {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      line-height: 1.4;
+      border-radius: 8px;
+      padding: 10px 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .popup-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .popup-subtitle {
+      font-size: 11px;
+      color: #555;
+      margin-bottom: 6px;
+    }
+
+    .popup-metric-value {
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="info-card" class="map-card">
+    <h2>US population density</h2>
+    <div id="text-description">
+      <p>Hover over a state!</p>
+    </div>
+    <p style="margin-top:4px;">
+      Values show population density (people per square mile). Click a state to pin its info.
+    </p>
+  </div>
+
+  <div id="legend-card" class="map-card">
+    <div id="legend-title">Population Density<br>(people/sq. mi.)</div>
+    <div id="legend"></div>
+  </div>
+
+  <script>
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: 'https://demotiles.maplibre.org/style.json',
+      zoom: 3,
+      center: [-100, 40] // contiguous US
+    });
+
+    let activePopup = null;
+    let selectedName = null; // track which state is currently highlighted
+
+    map.on('load', async () => {
+      try {
+        const response = await fetch('assets/state_data.geojson');
+        const stateData = await response.json();
+
+        map.addSource('stateData', {
+          type: 'geojson',
+          data: stateData
+        });
+
+        // Choropleth layer
+        map.addLayer({
+          id: 'stateData-layer',
+          type: 'fill',
+          source: 'stateData',
+          paint: {
+            'fill-color': [
+              'step',
+              ['get', 'density'],
+              '#FFEDA0',   // < 10
+              10, '#FED976',  // 10–19
+              20, '#FEB24C',  // 20–49
+              50, '#FD8D3C',  // 50–99
+              100, '#FC4E2A', // 100–199
+              200, '#E31A1C', // 200–499
+              500, '#BD0026', // 500–999
+              1000, '#800026' // 1000+
+            ],
+            'fill-outline-color': '#444444',
+            'fill-opacity': 0.8
+          }
+        });
+
+        // Highlight outline for clicked state (neon green)
+        map.addLayer({
+          id: 'stateData-highlight',
+          type: 'line',
+          source: 'stateData',
+          paint: {
+            'line-color': '#39FF14', // neon green
+            'line-width': 3
+          },
+          filter: ['==', ['get', 'name'], ''] // none initially
+        });
+
+        // Legend
+        const layers = [
+          '0–9',
+          '10–19',
+          '20–49',
+          '50–99',
+          '100–199',
+          '200–499',
+          '500–999',
+          '1000 and more'
+        ];
+        const colors = [
+          '#FFEDA0',
+          '#FED976',
+          '#FEB24C',
+          '#FD8D3C',
+          '#FC4E2A',
+          '#E31A1C',
+          '#BD0026',
+          '#800026'
+        ];
+
+        const legend = document.getElementById('legend');
+        legend.innerHTML = '';
+
+        layers.forEach((label, i) => {
+          const row = document.createElement('div');
+          row.className = 'legend-row';
+
+          const key = document.createElement('span');
+          key.className = 'legend-key';
+          key.style.backgroundColor = colors[i];
+
+          const value = document.createElement('span');
+          value.textContent = label;
+
+          row.appendChild(key);
+          row.appendChild(value);
+          legend.appendChild(row);
+        });
+
+        map.addControl(new maplibregl.NavigationControl());
+
+        // Hover preview in side card
+        map.on('mousemove', (event) => {
+          const features = map.queryRenderedFeatures(event.point, {
+            layers: ['stateData-layer']
+          });
+
+          const info = document.getElementById('text-description');
+
+          if (!features.length) {
+            info.innerHTML = '<p>Hover over a state!</p>';
+            return;
+          }
+
+          const props = features[0].properties;
+          info.innerHTML =
+            `<h3>${props.name}</h3>
+             <p><strong>${props.density}</strong> people per square mile</p>`;
+        });
+
+        map.on('mouseenter', 'stateData-layer', () => {
+          map.getCanvas().style.cursor = 'pointer';
+        });
+
+        map.on('mouseleave', 'stateData-layer', () => {
+          map.getCanvas().style.cursor = '';
+        });
+
+        // Click: highlight + popup
+        map.on('click', 'stateData-layer', (e) => {
+          const features = map.queryRenderedFeatures(e.point, {
+            layers: ['stateData-layer']
+          });
+          if (!features.length) return;
+          const props = features[0].properties;
+
+          // Track selected state name
+          selectedName = props.name;
+
+          // Highlight the clicked state
+          map.setFilter('stateData-highlight', [
+            '==',
+            ['get', 'name'],
+            props.name
+          ]);
+
+          // Close previous popup
+          if (activePopup) {
+            activePopup.remove();
+          }
+
+          const popupHtml = `
+            <div class="popup-title">${props.name}</div>
+            <div class="popup-subtitle">United States · population density</div>
+            <p><span class="popup-metric-value">${props.density}</span> people per square mile</p>
+          `;
+
+          const thisPopupName = props.name;
+
+          activePopup = new maplibregl.Popup({ offset: 10, closeOnMove: false })
+            .setLngLat(e.lngLat)
+            .setHTML(popupHtml)
+            .addTo(map);
+
+          // Clear highlight when THIS popup closes,
+          // but only if we haven't clicked another state since
+          activePopup.on('close', () => {
+            if (selectedName === thisPopupName) {
+              map.setFilter('stateData-highlight', ['==', ['get', 'name'], '']);
+              selectedName = null;
+            }
+          });
+        });
+
+      } catch (err) {
+        console.error('Error loading state_data.geojson:', err);
+      }
+    });
+  </script>
+</body>
+</html>
