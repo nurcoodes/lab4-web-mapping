@@ -60,7 +60,7 @@ Features include:
 ## GitHub Pages URLs
 
 Main deliverable:  
-https://[nurcoodes].github.io/[lab4-web-mapping]/index.html
+https://nurcoodes.github.io/[lab4-web-mapping]/index.html
 
 Population density example:  
-https://[nurcoodes].github.io/[lab4-web-mapping]/pop_density.html
+https://nurcoodes.github.io/[lab4-web-mapping]/pop_density.html
