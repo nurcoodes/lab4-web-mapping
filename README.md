@@ -7,6 +7,7 @@ This repository contains two interactive web maps created using **MapLibre GL JS
 
 ## Repository Structure
 
+```
 /[lab4-web-mapping]
 │── index.html → Final deliverable: WA COVID-19 map
 │── pop_density.html → Example: U.S. population density map
@@ -14,6 +15,7 @@ This repository contains two interactive web maps created using **MapLibre GL JS
 └── assets/
 ├── wa-covid-data-102521.geojson
 └── state_data.geojson
+```
 
 ---
 
